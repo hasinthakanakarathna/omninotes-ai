@@ -1,0 +1,792 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Multi-File Notes Generator</title>
+    
+    <!-- Tailwind CSS with Typography Plugin -->
+    <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <!-- Fonts and Icons -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Utilities: Marked (Markdown), PDF.js, HTML2PDF -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f8fafc;
+        }
+        
+        /* Custom scrollbar for side panel and main window */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1; 
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1; 
+            border-radius: 10px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8; 
+        }
+
+        .drop-zone {
+            transition: all 0.2s ease;
+        }
+        .drop-zone.dragover {
+            background-color: #eff6ff;
+            border-color: #3b82f6;
+        }
+
+        /* Loading spinner */
+        .loader {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #3b82f6;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+            vertical-align: middle;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="text-slate-800 antialiased overflow-x-hidden">
+
+    <!-- Sticky Toggle Button -->
+    <button id="toggleSidePanelBtn" class="fixed right-0 top-1/2 -translate-y-1/2 bg-blue-600 hover:bg-blue-700 text-white p-3 pl-4 pr-3 rounded-l-xl shadow-lg z-50 transition-all duration-300 focus:outline-none flex items-center gap-2 group">
+        <i class="fa-solid fa-gear group-hover:rotate-90 transition-transform duration-300"></i>
+    </button>
+
+    <!-- Side Panel -->
+    <div id="sidePanel" class="fixed right-0 top-0 h-full w-80 bg-white shadow-2xl transform translate-x-full transition-transform duration-300 z-40 flex flex-col border-l border-slate-200">
+        <div class="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+            <h2 class="text-lg font-semibold text-slate-800"><i class="fa-solid fa-sliders text-blue-600 mr-2"></i>Settings & Cloud</h2>
+            <button id="closeSidePanelBtn" class="text-slate-400 hover:text-slate-600 focus:outline-none">
+                <i class="fa-solid fa-xmark text-xl"></i>
+            </button>
+        </div>
+        
+        <div class="flex-1 overflow-y-auto p-5 space-y-8">
+            <!-- API Key Section -->
+            <div class="space-y-3">
+                <h3 class="text-sm font-semibold text-slate-500 uppercase tracking-wider">Gemini API Key</h3>
+                <div>
+                    <input type="password" id="apiKeyInput" placeholder="Enter your Gemini API Key" 
+                           class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-shadow placeholder-slate-400">
+                    <p class="text-xs text-slate-400 mt-1">Required for generating notes.</p>
+                </div>
+            </div>
+
+            <!-- Database / Cloud Section -->
+            <div class="space-y-3">
+                <h3 class="text-sm font-semibold text-slate-500 uppercase tracking-wider">Cloud Storage</h3>
+                
+                <!-- Unauthenticated View -->
+                <div id="authSection" class="bg-blue-50 p-4 rounded-xl border border-blue-100">
+                    <p class="text-sm text-blue-800 mb-3">Log in to save and access your notes across devices.</p>
+                    <button id="loginBtn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg text-sm transition-colors flex items-center justify-center gap-2">
+                        <i class="fa-solid fa-cloud"></i> Log In to Cloud
+                    </button>
+                </div>
+
+                <!-- Authenticated View -->
+                <div id="cloudDataSection" class="hidden flex flex-col h-full space-y-3">
+                    <div class="flex items-center justify-between text-sm">
+                        <span class="text-green-600 font-medium flex items-center gap-1"><i class="fa-solid fa-circle-check"></i> Connected</span>
+                        <span id="userIdentifier" class="text-slate-400 text-xs truncate max-w-[120px]"></span>
+                    </div>
+                    
+                    <div class="flex-1 border border-slate-200 rounded-lg bg-slate-50 flex flex-col min-h-[250px]">
+                        <div class="px-3 py-2 border-b border-slate-200 bg-white rounded-t-lg">
+                            <h4 class="text-xs font-semibold text-slate-600 flex justify-between items-center">
+                                Saved Notes
+                                <button id="refreshCloudBtn" class="text-slate-400 hover:text-blue-500 transition-colors" title="Refresh">
+                                    <i class="fa-solid fa-rotate-right"></i>
+                                </button>
+                            </h4>
+                        </div>
+                        <div id="cloudNotesList" class="flex-1 overflow-y-auto p-2 space-y-2">
+                            <!-- Cloud notes populated here -->
+                            <div class="text-center text-slate-400 text-sm mt-4 italic">No saved notes yet.</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification Container -->
+    <div id="toastContainer" class="fixed bottom-5 left-1/2 -translate-x-1/2 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+    <main class="max-w-5xl mx-auto p-4 sm:p-6 lg:p-8 transition-all duration-300" id="mainContainer">
+        <!-- Header -->
+        <header class="text-center mb-8">
+            <h1 class="text-3xl sm:text-4xl font-bold text-slate-900 mb-2">Multi-File AI Notes <span class="text-blue-600">Generator</span></h1>
+            <p class="text-slate-500">Upload documents, PDFs, or images to instantly generate comprehensive study notes.</p>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
+            <!-- Left Column: Input -->
+            <div class="lg:col-span-5 flex flex-col gap-6">
+                
+                <!-- File Upload Dropzone -->
+                <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-lg font-semibold text-slate-800">Source Materials</h2>
+                        <span class="text-xs font-medium bg-slate-100 text-slate-500 px-2 py-1 rounded-md" id="fileCountBadge">0 files</span>
+                    </div>
+
+                    <div id="dropZone" class="drop-zone border-2 border-dashed border-slate-300 rounded-xl p-8 text-center cursor-pointer hover:bg-slate-50">
+                        <input type="file" id="fileInput" multiple accept=".txt,.pdf,image/*" class="hidden">
+                        <div class="w-12 h-12 bg-blue-50 text-blue-500 rounded-full flex items-center justify-center mx-auto mb-3">
+                            <i class="fa-solid fa-file-arrow-up text-xl"></i>
+                        </div>
+                        <p class="text-sm font-medium text-slate-700">Click to upload or drag & drop</p>
+                        <p class="text-xs text-slate-400 mt-1">PDF, TXT, JPG, PNG supported</p>
+                    </div>
+
+                    <div id="fileList" class="mt-4 space-y-2 max-h-48 overflow-y-auto">
+                        <!-- Uploaded files appear here -->
+                    </div>
+                </div>
+
+                <!-- Generation Options & Button -->
+                <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
+                     <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-700 mb-1">Focus Area (Optional)</label>
+                            <input type="text" id="customPrompt" placeholder="e.g., Focus on key definitions and formulas..." 
+                                   class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        </div>
+                        <button id="generateBtn" class="w-full bg-slate-900 hover:bg-black text-white font-medium py-3 px-4 rounded-xl shadow-md transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                            <i class="fa-solid fa-wand-magic-sparkles"></i> Generate Notes
+                        </button>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- Right Column: Output -->
+            <div class="lg:col-span-7 flex flex-col h-full">
+                <div class="bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col h-[600px] lg:h-auto lg:min-h-[600px] flex-1">
+                    
+                    <!-- Output Toolbar -->
+                    <div class="px-5 py-3 border-b border-slate-100 flex justify-between items-center bg-slate-50 rounded-t-2xl">
+                        <h2 class="text-sm font-semibold text-slate-700 uppercase tracking-wider flex items-center gap-2">
+                            <i class="fa-solid fa-book-open text-blue-500"></i> Generated Notes
+                        </h2>
+                        
+                        <div class="flex gap-2">
+                            <button id="exportPdfBtn" class="hidden items-center gap-1.5 text-xs font-medium text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 px-3 py-1.5 rounded-lg shadow-sm transition-colors">
+                                <i class="fa-regular fa-file-pdf text-red-500"></i> Export PDF
+                            </button>
+                            <button id="saveCloudBtn" class="hidden items-center gap-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 px-3 py-1.5 rounded-lg shadow-sm transition-colors">
+                                <i class="fa-solid fa-cloud-arrow-up"></i> Save to Cloud
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Output Content Area -->
+                    <div class="p-6 flex-1 overflow-y-auto relative">
+                        <div id="outputContainer" class="prose prose-slate prose-sm sm:prose-base max-w-none">
+                            <div class="h-full flex flex-col items-center justify-center text-slate-400 space-y-4 pt-20">
+                                <i class="fa-solid fa-robot text-4xl text-slate-200"></i>
+                                <p class="text-sm text-center">Your generated notes will appear here.<br>Upload files and click "Generate" to start.</p>
+                            </div>
+                        </div>
+                        
+                        <!-- Overlay Loading State -->
+                        <div id="loadingOverlay" class="absolute inset-0 bg-white/80 backdrop-blur-sm hidden flex-col items-center justify-center z-10">
+                            <div class="loader mb-4 border-t-blue-600 h-10 w-10 border-4"></div>
+                            <p class="text-sm font-medium text-slate-700 animate-pulse">Analyzing documents & writing notes...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script type="module">
+        // Import Firebase SDKs
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, collection, addDoc, getDocs, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Firebase Configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyAl_lap7toVrjrje1nbxnhgwiW07RyKj6Y",
+            authDomain: "omninotes-d552e.firebaseapp.com",
+            projectId: "omninotes-d552e",
+            storageBucket: "omninotes-d552e.firebasestorage.app",
+            messagingSenderId: "1055512297327",
+            appId: "1:1055512297327:web:21a0e14141f52f966b329a",
+            measurementId: "G-XF5VSEZRBM"
+        };
+
+        // Initialize Firebase
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+        let currentUser = null;
+
+        // Initialize PDF.js worker
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+
+        // --- Application State ---
+        let uploadedFilesData = []; // Array of objects: { name, type, data, isImage }
+        let currentGeneratedMarkdown = ""; // Holds the raw markdown of current note
+
+        // --- DOM Elements ---
+        // Side Panel
+        const toggleSidePanelBtn = document.getElementById('toggleSidePanelBtn');
+        const closeSidePanelBtn = document.getElementById('closeSidePanelBtn');
+        const sidePanel = document.getElementById('sidePanel');
+        const mainContainer = document.getElementById('mainContainer');
+        const apiKeyInput = document.getElementById('apiKeyInput');
+        
+        // Auth / Cloud UI
+        const authSection = document.getElementById('authSection');
+        const cloudDataSection = document.getElementById('cloudDataSection');
+        const loginBtn = document.getElementById('loginBtn');
+        const userIdentifier = document.getElementById('userIdentifier');
+        const cloudNotesList = document.getElementById('cloudNotesList');
+        const refreshCloudBtn = document.getElementById('refreshCloudBtn');
+
+        // Main UI
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('fileInput');
+        const fileList = document.getElementById('fileList');
+        const fileCountBadge = document.getElementById('fileCountBadge');
+        const generateBtn = document.getElementById('generateBtn');
+        const customPrompt = document.getElementById('customPrompt');
+        
+        // Output UI
+        const outputContainer = document.getElementById('outputContainer');
+        const loadingOverlay = document.getElementById('loadingOverlay');
+        const exportPdfBtn = document.getElementById('exportPdfBtn');
+        const saveCloudBtn = document.getElementById('saveCloudBtn');
+        const toastContainer = document.getElementById('toastContainer');
+
+        // --- UI Interactions ---
+
+        // Side Panel Toggle
+        function togglePanel() {
+            const isClosed = sidePanel.classList.contains('translate-x-full');
+            if (isClosed) {
+                sidePanel.classList.remove('translate-x-full');
+                toggleSidePanelBtn.classList.add('right-80');
+                toggleSidePanelBtn.classList.remove('right-0');
+            } else {
+                sidePanel.classList.add('translate-x-full');
+                toggleSidePanelBtn.classList.remove('right-80');
+                toggleSidePanelBtn.classList.add('right-0');
+            }
+        }
+        toggleSidePanelBtn.addEventListener('click', togglePanel);
+        closeSidePanelBtn.addEventListener('click', togglePanel);
+
+        // Toast System
+        function showToast(message, isError = false) {
+            const toast = document.createElement('div');
+            toast.className = `px-4 py-2 rounded-lg shadow-lg text-sm font-medium transition-all duration-300 transform translate-y-full opacity-0 flex items-center gap-2 pointer-events-auto ${isError ? 'bg-red-600 text-white' : 'bg-slate-800 text-white'}`;
+            toast.innerHTML = `<i class="fa-solid ${isError ? 'fa-circle-exclamation' : 'fa-circle-check'}"></i> ${message}`;
+            toastContainer.appendChild(toast);
+            
+            // Animate in
+            setTimeout(() => {
+                toast.classList.remove('translate-y-full', 'opacity-0');
+            }, 10);
+
+            // Animate out
+            setTimeout(() => {
+                toast.classList.add('translate-y-full', 'opacity-0');
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+
+        // --- Firebase Auth & Database Logic ---
+
+        async function handleLogin() {
+            loginBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Connecting...';
+            loginBtn.disabled = true;
+
+            try {
+                await signInAnonymously(auth);
+                showToast("Connected to Cloud Services");
+            } catch (error) {
+                console.error("Auth error:", error);
+                showToast("Authentication failed.", true);
+                loginBtn.innerHTML = '<i class="fa-solid fa-cloud"></i> Log In to Cloud';
+                loginBtn.disabled = false;
+            }
+        }
+
+        loginBtn.addEventListener('click', handleLogin);
+
+        // Listen for auth state changes
+        onAuthStateChanged(auth, (user) => {
+            if (user) {
+                currentUser = user;
+                authSection.classList.add('hidden');
+                cloudDataSection.classList.remove('hidden');
+                userIdentifier.textContent = `ID: ${user.uid.substring(0, 8)}...`;
+                fetchCloudNotes();
+            } else {
+                currentUser = null;
+                authSection.classList.remove('hidden');
+                cloudDataSection.classList.add('hidden');
+            }
+        });
+
+        // Fetch Notes from Cloud
+        async function fetchCloudNotes() {
+            if (!currentUser || !db) return;
+            
+            cloudNotesList.innerHTML = '<div class="text-center text-slate-400 text-xs py-2"><i class="fa-solid fa-spinner fa-spin"></i> Loading...</div>';
+            
+            try {
+                const notesRef = collection(db, 'users', currentUser.uid, 'notes');
+                const querySnapshot = await getDocs(notesRef);
+                
+                const notes = [];
+                querySnapshot.forEach((doc) => {
+                    notes.push({ id: doc.id, ...doc.data() });
+                });
+
+                // Sort locally by timestamp descending
+                notes.sort((a, b) => b.timestamp - a.timestamp);
+                
+                renderCloudNotesList(notes);
+            } catch (error) {
+                console.error("Fetch notes error:", error);
+                cloudNotesList.innerHTML = '<div class="text-center text-red-400 text-xs py-2">Error loading notes.</div>';
+            }
+        }
+
+        refreshCloudBtn.addEventListener('click', () => {
+            refreshCloudBtn.classList.add('animate-spin');
+            fetchCloudNotes().then(() => {
+                setTimeout(() => refreshCloudBtn.classList.remove('animate-spin'), 500);
+            });
+        });
+
+        function renderCloudNotesList(notes) {
+            cloudNotesList.innerHTML = '';
+            
+            if (notes.length === 0) {
+                cloudNotesList.innerHTML = '<div class="text-center text-slate-400 text-sm mt-4 italic">No saved notes yet.</div>';
+                return;
+            }
+
+            notes.forEach(note => {
+                const noteEl = document.createElement('div');
+                noteEl.className = 'group p-3 bg-white border border-slate-200 rounded-lg hover:border-blue-300 hover:shadow-sm cursor-pointer transition-all flex flex-col gap-1';
+                
+                const date = new Date(note.timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+                
+                noteEl.innerHTML = `
+                    <div class="flex justify-between items-start">
+                        <span class="text-sm font-medium text-slate-800 truncate pr-2">${note.title || 'Untitled Note'}</span>
+                        <button class="delete-note-btn opacity-0 group-hover:opacity-100 text-slate-300 hover:text-red-500 transition-opacity focus:outline-none" data-id="${note.id}" title="Delete">
+                            <i class="fa-solid fa-trash text-xs"></i>
+                        </button>
+                    </div>
+                    <span class="text-xs text-slate-400"><i class="fa-regular fa-clock mr-1"></i>${date}</span>
+                `;
+
+                // Load note on click
+                noteEl.addEventListener('click', (e) => {
+                    if (e.target.closest('.delete-note-btn')) return;
+                    loadNoteIntoView(note.content, note.title);
+                });
+
+                // Delete note
+                const deleteBtn = noteEl.querySelector('.delete-note-btn');
+                deleteBtn.addEventListener('click', async (e) => {
+                    e.stopPropagation();
+                    if (!confirm("Delete this saved note?")) return;
+                    
+                    try {
+                        const docRef = doc(db, 'users', currentUser.uid, 'notes', note.id);
+                        await deleteDoc(docRef);
+                        showToast("Note deleted");
+                        noteEl.remove();
+                        if (cloudNotesList.children.length === 0) {
+                            cloudNotesList.innerHTML = '<div class="text-center text-slate-400 text-sm mt-4 italic">No saved notes yet.</div>';
+                        }
+                    } catch (err) {
+                        showToast("Error deleting note", true);
+                    }
+                });
+
+                cloudNotesList.appendChild(noteEl);
+            });
+        }
+
+        // Save Current Note to Cloud
+        async function saveNoteToCloud() {
+            if (!currentUser || !db) {
+                showToast("Please log in to the Cloud first.", true);
+                if (sidePanel.classList.contains('translate-x-full')) togglePanel();
+                return;
+            }
+            if (!currentGeneratedMarkdown) {
+                showToast("No generated notes to save.", true);
+                return;
+            }
+
+            const originalBtnHtml = saveCloudBtn.innerHTML;
+            saveCloudBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Saving...';
+            saveCloudBtn.disabled = true;
+
+            try {
+                const title = "Notes - " + new Date().toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' });
+                
+                const notesRef = collection(db, 'users', currentUser.uid, 'notes');
+                await addDoc(notesRef, {
+                    title: title,
+                    content: currentGeneratedMarkdown,
+                    timestamp: Date.now()
+                });
+                
+                showToast("Successfully saved to Cloud!");
+                fetchCloudNotes();
+            } catch (error) {
+                console.error("Save error:", error);
+                showToast("Failed to save to cloud.", true);
+            } finally {
+                saveCloudBtn.innerHTML = originalBtnHtml;
+                saveCloudBtn.disabled = false;
+            }
+        }
+
+        saveCloudBtn.addEventListener('click', saveNoteToCloud);
+
+        // --- File Handling & Parsing Logic ---
+
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, preventDefaults, false);
+        });
+
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropZone.addEventListener(eventName, () => dropZone.classList.add('dragover'), false);
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, () => dropZone.classList.remove('dragover'), false);
+        });
+
+        dropZone.addEventListener('drop', handleDrop, false);
+        dropZone.addEventListener('click', () => fileInput.click());
+        fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
+
+        function handleDrop(e) {
+            const dt = e.dataTransfer;
+            const files = dt.files;
+            handleFiles(files);
+        }
+
+        async function handleFiles(files) {
+            if (!files || files.length === 0) return;
+
+            for (let i = 0; i < files.length; i++) {
+                const file = files[i];
+                await processFile(file);
+            }
+            
+            updateFileListUI();
+        }
+
+        async function processFile(file) {
+            if (uploadedFilesData.some(f => f.name === file.name)) {
+                showToast(`File ${file.name} is already added.`, true);
+                return;
+            }
+
+            try {
+                let data = "";
+                let isImage = false;
+                let mimeType = file.type;
+
+                if (file.type.startsWith('image/')) {
+                    data = await readAsDataURL(file);
+                    isImage = true;
+                } else if (file.type === 'application/pdf') {
+                    data = await extractTextFromPDF(file);
+                } else if (file.type.startsWith('text/') || file.name.endsWith('.md')) {
+                    data = await readAsText(file);
+                } else {
+                    showToast(`Unsupported file type: ${file.name}`, true);
+                    return;
+                }
+
+                uploadedFilesData.push({
+                    id: Math.random().toString(36).substr(2, 9),
+                    name: file.name,
+                    type: mimeType,
+                    size: file.size,
+                    data: data,
+                    isImage: isImage
+                });
+
+            } catch (err) {
+                console.error(`Error processing ${file.name}:`, err);
+                showToast(`Failed to read ${file.name}`, true);
+            }
+        }
+
+        function readAsText(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = e => resolve(e.target.result);
+                reader.onerror = e => reject(e);
+                reader.readAsText(file);
+            });
+        }
+
+        function readAsDataURL(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = e => resolve(e.target.result);
+                reader.onerror = e => reject(e);
+                reader.readAsDataURL(file);
+            });
+        }
+
+        async function extractTextFromPDF(file) {
+            const arrayBuffer = await file.arrayBuffer();
+            const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+            let fullText = "";
+            for (let i = 1; i <= pdf.numPages; i++) {
+                const page = await pdf.getPage(i);
+                const textContent = await page.getTextContent();
+                const pageText = textContent.items.map(s => s.str).join(" ");
+                fullText += `--- Page ${i} ---\n${pageText}\n\n`;
+            }
+            return fullText;
+        }
+
+        function updateFileListUI() {
+            fileList.innerHTML = '';
+            fileCountBadge.textContent = `${uploadedFilesData.length} file${uploadedFilesData.length !== 1 ? 's' : ''}`;
+            
+            generateBtn.disabled = uploadedFilesData.length === 0;
+
+            uploadedFilesData.forEach(fileObj => {
+                const fileEl = document.createElement('div');
+                fileEl.className = 'flex justify-between items-center p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm';
+                
+                let icon = 'fa-file-lines text-slate-500';
+                if (fileObj.isImage) icon = 'fa-image text-blue-500';
+                else if (fileObj.type === 'application/pdf') icon = 'fa-file-pdf text-red-500';
+
+                const sizeKB = (fileObj.size / 1024).toFixed(1) + ' KB';
+
+                fileEl.innerHTML = `
+                    <div class="flex items-center gap-3 overflow-hidden">
+                        <i class="fa-solid ${icon} text-lg"></i>
+                        <div class="truncate flex flex-col">
+                            <span class="font-medium text-slate-700 truncate">${fileObj.name}</span>
+                            <span class="text-xs text-slate-400">${sizeKB}</span>
+                        </div>
+                    </div>
+                    <button class="remove-file-btn text-slate-400 hover:text-red-500 transition-colors p-1 focus:outline-none" data-id="${fileObj.id}" title="Remove file">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
+                `;
+
+                fileEl.querySelector('.remove-file-btn').addEventListener('click', (e) => {
+                    const id = e.currentTarget.getAttribute('data-id');
+                    uploadedFilesData = uploadedFilesData.filter(f => f.id !== id);
+                    updateFileListUI();
+                });
+
+                fileList.appendChild(fileEl);
+            });
+        }
+
+        // --- AI Generation & Output Handling ---
+
+        async function generateNotes() {
+            if (uploadedFilesData.length === 0) return;
+
+            const apiKey = apiKeyInput.value.trim();
+            if (!apiKey) {
+                showToast("Please enter your Gemini API Key in the settings panel.", true);
+                if (sidePanel.classList.contains('translate-x-full')) togglePanel();
+                apiKeyInput.focus();
+                return;
+            }
+
+            loadingOverlay.classList.remove('hidden');
+            loadingOverlay.classList.add('flex');
+            exportPdfBtn.classList.add('hidden');
+            saveCloudBtn.classList.add('hidden');
+
+            try {
+                const parts = [];
+                
+                let systemPrompt = `You are an expert AI study assistant. Your task is to generate comprehensive, well-structured study notes based ONLY on the provided source materials. 
+Format your response entirely in Markdown. 
+Use clear headings (H1, H2, H3), bullet points, bold text for key terms, and code blocks if applicable.
+Do not invent information outside of what is provided. Organize the information logically.`;
+
+                const userFocus = customPrompt.value.trim();
+                if (userFocus) {
+                    systemPrompt += `\n\nThe user has requested a specific focus: "${userFocus}". Tailor your notes to emphasize this area while still covering the essential context.`;
+                }
+
+                parts.push({ text: "SYSTEM INSTRUCTION:\n" + systemPrompt + "\n\nSOURCE MATERIALS:\n" });
+
+                for (let i = 0; i < uploadedFilesData.length; i++) {
+                    const file = uploadedFilesData[i];
+                    if (file.isImage) {
+                        const base64Data = file.data.split(',')[1];
+                        parts.push({
+                            inlineData: {
+                                mimeType: file.type,
+                                data: base64Data
+                            }
+                        });
+                        parts.push({ text: `\n[End of image: ${file.name}]\n` });
+                    } else {
+                        parts.push({ text: `\n--- Document: ${file.name} ---\n${file.data}\n` });
+                    }
+                }
+
+                const payload = { contents: [{ parts: parts }] };
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!response.ok) {
+                    const errData = await response.json();
+                    throw new Error(errData.error?.message || `HTTP Error ${response.status}`);
+                }
+
+                const result = await response.json();
+                const generatedText = result.candidates?.[0]?.content?.parts?.[0]?.text;
+
+                if (generatedText) {
+                    loadNoteIntoView(generatedText, null);
+                } else {
+                    throw new Error("No text generated in response.");
+                }
+
+            } catch (error) {
+                console.error("Generation Error:", error);
+                showToast(`Generation failed: ${error.message}`, true);
+            } finally {
+                loadingOverlay.classList.remove('flex');
+                loadingOverlay.classList.add('hidden');
+            }
+        }
+
+        function loadNoteIntoView(markdownText, optionalTitle = null) {
+            currentGeneratedMarkdown = markdownText;
+            
+            const parsedHtml = marked.parse(markdownText);
+            outputContainer.innerHTML = parsedHtml;
+            
+            outputContainer.classList.add('prose-h1:text-2xl', 'prose-h1:font-bold', 'prose-h1:mb-4', 'prose-h1:text-slate-900',
+                                            'prose-h2:text-xl', 'prose-h2:font-semibold', 'prose-h2:mb-3', 'prose-h2:mt-6', 'prose-h2:text-slate-800',
+                                            'prose-h3:text-lg', 'prose-h3:font-medium', 'prose-h3:mt-4',
+                                            'prose-p:text-slate-600', 'prose-p:leading-relaxed', 'prose-p:mb-4',
+                                            'prose-ul:list-disc', 'prose-ul:pl-5', 'prose-ul:mb-4', 'prose-li:text-slate-600', 'prose-li:mb-1',
+                                            'prose-strong:text-slate-900', 'prose-strong:font-semibold');
+
+            exportPdfBtn.classList.remove('hidden');
+            exportPdfBtn.classList.add('flex');
+            
+            saveCloudBtn.classList.remove('hidden');
+            saveCloudBtn.classList.add('flex');
+
+            if (optionalTitle) {
+                showToast("Loaded cloud note: " + optionalTitle);
+                if (window.innerWidth < 1024) togglePanel();
+            } else {
+                showToast("Notes generated successfully!");
+            }
+        }
+
+        generateBtn.addEventListener('click', generateNotes);
+
+        // Export PDF
+        exportPdfBtn.addEventListener('click', () => {
+            if (!currentGeneratedMarkdown) return;
+            
+            const originalBtnHtml = exportPdfBtn.innerHTML;
+            exportPdfBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Exporting...';
+            exportPdfBtn.disabled = true;
+
+            const element = document.createElement('div');
+            element.innerHTML = outputContainer.innerHTML;
+            element.style.padding = '20px';
+            element.style.fontFamily = 'Inter, sans-serif';
+            element.style.color = '#334155';
+            
+            const headings = element.querySelectorAll('h1, h2, h3');
+            headings.forEach(h => { h.style.color = '#0f172a'; h.style.marginTop = '20px'; h.style.marginBottom = '10px'; });
+            const lists = element.querySelectorAll('ul');
+            lists.forEach(l => { l.style.paddingLeft = '20px'; l.style.marginBottom = '10px'; });
+
+            const opt = {
+                margin:       15,
+                filename:     `AI-Notes-${new Date().getTime()}.pdf`,
+                image:        { type: 'jpeg', quality: 0.98 },
+                html2canvas:  { scale: 2, useCORS: true },
+                jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
+            };
+
+            html2pdf().set(opt).from(element).save().then(() => {
+                exportPdfBtn.innerHTML = originalBtnHtml;
+                exportPdfBtn.disabled = false;
+                showToast("PDF exported successfully");
+            }).catch(err => {
+                console.error("PDF Export Error", err);
+                showToast("Failed to export PDF", true);
+                exportPdfBtn.innerHTML = originalBtnHtml;
+                exportPdfBtn.disabled = false;
+            });
+        });
+
+        // Initialize state
+        updateFileListUI();
+
+    </script>
+</body>
+</html>
